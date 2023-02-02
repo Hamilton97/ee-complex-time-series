@@ -21,6 +21,17 @@ class ModelCfg:
 
 
 class HarmonicsImage:
+
+    @staticmethod
+    def add_harmonics(freqs: List[str], cos_names: List[str], sin_names: List[str]):
+        def add_inner(image: ee.Image):
+            frequencies = ee.Image.constant(freqs)
+            time = ee.Image(image).select('t')
+            cosines = time.multiply(frequencies).cos().rename(cos_names)
+            sines = time.multiply(frequencies).sin().rename(sin_names)
+            return image.addBands(cosines).addBands(sines)
+        return add_inner
+    
     def __init__(self, cfg: ModelCfg) -> None:
         self._CFG = cfg
 
@@ -41,15 +52,28 @@ class HarmonicsImage:
             arrayProject([0]).\
             arrayFlatten([cfg.independent])
     
-    @staticmethod
-    def add_harmonics(freqs: List[str], cos_names: List[str], sin_names: List[str]):
-        def add_inner(image: ee.Image):
-            frequencies = ee.Image.constant(freqs)
-            time = ee.Image(image).select('t')
-            cosines = time.multiply(frequencies).cos().rename(cos_names)
-            sines = time.multiply(frequencies).sin().rename(sin_names)
-            return image.addBands(cosines).addBands(sines)
-        return add_inner
+    @property
+    def phase(self) -> ee.Image:
+        def mk_phase_inner(numerator: str, denominator: str) -> ee.Image:
+            return self._harmonic_coeff.select(numerator).atan(self._harmonic_coeff.\
+                select(denominator)).unitScale(-math.pi, math.pi)
+        return ee.Image.cat(*[mk_phase_inner(x,y) for x,y in zip(self._CFG.sin_hs, 
+                                                                 self._CFG.cos_hs)])
+    
+    @property
+    def ampltiude(self) -> ee.Image:
+        
+        def mk_amp_inner(numerator, denominator) -> ee.Image:
+            return self._harmonic_coeff.select(numerator)\
+                .hypot(self._harmonic_coeff.select(denominator))
+        
+        return ee.Image.cat(*[mk_amp_inner(x,y) for x,y in zip(self._CFG.sin_hs, 
+                                                                self._CFG.cos_hs)])
+    
+    @property
+    def mean_dependent(self) -> ee.Image:
+        return self._CFG.time_seies_collection.select(self._CFG.dependent).mean()
+    
     
     def fit_harmonics(self) -> None:
         def fit_inner(element: ee.Image):
