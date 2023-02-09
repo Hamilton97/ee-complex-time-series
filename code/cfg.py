@@ -7,7 +7,7 @@ class HarmonicCFG:
     dependend: str = field(default='NDVI')
     independents: list = field(default_factory= lambda: ['constant', 't'])
     harmonics: int = 2
-    collection: ee.ImageCollection = field(init=False)
+    collection: ee.ImageCollection = field(init=False, repr=False)
     
     def __post_init__(self):
         self.harmonic_freq = list(range(1, self.harmonics + 1))

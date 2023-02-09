@@ -7,16 +7,11 @@ from typing import Union, Callable, List
 
 import ee
 
+import bands
 
-def add_ndvi(red: str, nir: str ) -> Callable:
-    def wrapper(element: ee.Image):
-        equation = '(NIR - RED) / (NIR + RED)'
-        calc = element.expression(
-            expression=equation,
-            opt_map={'NIR': nir, 'RED': red}
-        ).rename('NDVI').float()
-        return element.addBands(calc)
-    return wrapper
+
+def add_ndvi(element: ee.Image) -> Callable:
+    return element.addBands(element.normalizedDifference(['NIR', 'Red']).rename('NDVI'))
 
 
 def add_constant(element: ee.Image):
@@ -33,32 +28,36 @@ def add_time(omega: float = 1.5) -> Callable:
 
 
 class InputCollection:
+    START_YYYY: int = 2017
+    END_YYYY: int = 2021
     
     def __new__(cls, cType: str, roi: Union[ee.Geometry, ee.FeatureCollection], omega: int = 1.5):
         _cKeyword = {
-            'l8': LandSAT8,
+            'L8SR': LandSAT8SR,
             'S2_SR': Sentinel2SR,
             'S2_TOA': Sentinel2TOA
         }
         
-        cfg: _BaseData = _cKeyword.get(cType, None)
-        
+        cfg: _BaseData = _cKeyword.get(cType, None)()
         
         if cfg is None:
             raise KeyError(f"{cType} not at valid Key must be: {_cKeyword.keys()}")
         
-        instance = ee.ImageCollection(cfg.ASSET_ID).filterBounds(roi).filterDate('2017', '2021')\
-            .map(cfg.cloud_mask).map(add_ndvi(red=cfg.RED, nir=cfg.NIR)).map(add_time(omega=omega))\
-                .map(add_constant)
+        prep = ee.ImageCollection(cfg.ASSET_ID).filterBounds(roi)\
+            .filterDate(f'{cls.START_YYYY}', f'{cls.END_YYYY}')\
+            .map(cfg.cloud_mask)
 
-        return instance
-        
+        output = prep.select(cfg.BANDS, cfg.BDESC).map(add_time(omega=omega))\
+                .map(add_constant).map(add_ndvi)
 
-@dataclass
+        return output
+
+
+@dataclass(frozen=True)
 class _BaseData(ABC):
     ASSET_ID: str = field(default=None)
-    NIR: str = field(default=None)
-    RED: str = field(default=None)
+    BANDS: List[str] = field(default_factory= lambda: [])
+    BDESC: List[str] = field(default_factory= lambda: [])
     
     @abstractstaticmethod
     def cloud_mask(element):
@@ -66,10 +65,10 @@ class _BaseData(ABC):
 
 
 @dataclass(frozen=True)
-class LandSAT8(_BaseData):
+class LandSAT8SR(_BaseData):
     ASSET_ID: str = field(default="LANDSAT/LC08/C02/T1_L2")
-    NIR: str = field(default='SR_B6')
-    RED: str = field(default='SR_B5') 
+    BANDS: List[str] = field(default_factory=lambda :[str(_.name) for _ in bands.LS8SR]) 
+    BDESC: List[str] = field(default_factory=lambda :[str(_.value) for _ in bands.LS8SR])
     
     @staticmethod
     def cloud_mask(element: ee.Image):
@@ -86,9 +85,9 @@ class LandSAT8(_BaseData):
 
 @dataclass(frozen=True)
 class Sentinel2TOA(_BaseData):
-    ASSET_ID: str =field(default="COPERNICUS/S2_HARMONIZED") 
-    NIR: str = field(default="B8")
-    RED: str = field(default="B4")
+    ASSET_ID: str =field(default="COPERNICUS/S2_HARMONIZED")
+    BANDS: List[str] = field(default_factory=lambda :[str(_.name) for _ in bands.S2TOA]) 
+    BDESC: List[str] = field(default_factory=lambda :[str(_.value) for _ in bands.S2TOA])
     
     @staticmethod
     def cloud_mask(element: ee.Image):
@@ -101,9 +100,9 @@ class Sentinel2TOA(_BaseData):
 
 @dataclass(frozen=True)
 class Sentinel2SR(_BaseData):
-    ASSET_ID: str =field(default="COPERNICUS/S2_SR_HARMONIZED") 
-    NIR: str = field(default="B8")
-    RED: str = field(default="B4")
+    ASSET_ID: str =field(default="COPERNICUS/S2_SR_HARMONIZED")
+    BANDS: List[str] = field(default_factory=lambda :[str(_.value) for _ in bands.S2SR])
+    BDESC: List[str] = field(default_factory=lambda :[str(_.value) for _ in bands.S2SR])
     
     @staticmethod
     def cloud_mask(element: ee.Image):
